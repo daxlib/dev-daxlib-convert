@@ -1,0 +1,80 @@
+# Publish workflow to add a new version of a package
+#
+# This workflow creates a branch in the daxlib/daxlib GitHub repository
+# to add a new version of the package. After the workflow completes,
+# a pull request should be created manually to merge the changes.
+#
+# TODO:
+# - Automate the PR creation
+
+name: publish-package-pr
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  DAXLIB_NAME: 'DaxLib.Convert'
+  DAXLIB_PATH: 'packages/d/daxlib.convert'
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      # Checkout the current repository
+      - name: checkout source
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ github.repository }}
+          path: source-repo
+
+      # Checkout the upstream repository daxlib/daxlib
+      - name: checkout upstream
+        uses: actions/checkout@v4
+        with:
+          repository: daxlib/daxlib
+          path: upstream-repo
+          token: ${{ secrets.DAXLIB_TOKEN }} # Required to push changes
+        
+      # Configure Git
+      - name: git config
+        working-directory: upstream-repo
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+
+      # Extract package version from manifest
+      - name: get package version
+        id: get_package_version
+        working-directory: source-repo
+        run: |
+          VERSION=$(jq -r '.version' src/manifest.daxlib)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Package version: $VERSION"
+
+      # Create the feature branch for the new version
+      - name: create release branch
+        working-directory: upstream-repo
+        run: git checkout -b "${{ github.event.repository.name }}/release-${{ env.DAXLIB_NAME }}-${{ steps.get_package_version.outputs.version }}"
+              
+      # Create the package folder for the new version
+      - name: create package folder
+        working-directory: upstream-repo
+        run: mkdir -p "${{ env.DAXLIB_PATH }}/${{ steps.get_package_version.outputs.version }}"
+
+      # Copy package files to the new folder
+      - name: copy package files
+        run: cp -rv source-repo/src/* "upstream-repo/${{ env.DAXLIB_PATH }}/${{ steps.get_package_version.outputs.version }}/"
+
+      # Stage and commit changes
+      - name: git commit changes
+        working-directory: upstream-repo
+        run: git add -A && git commit -m "Add package ${{ env.DAXLIB_NAME }} version ${{ steps.get_package_version.outputs.version }}"
+
+      # Push branch to upstream repository
+      - name: git push upstream
+        working-directory: upstream-repo
+        run: git push origin "${{ github.event.repository.name }}/release-${{ env.DAXLIB_NAME }}-${{ steps.get_package_version.outputs.version }}"
+
